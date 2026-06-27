@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>组会汇报排表</title>
+<style>
+  :root{--bg:#0f1419;--card:#171f29;--card2:#1d2733;--line:#2a3744;--txt:#e6edf3;
+    --muted:#8b9bb0;--accent:#4cc2ff;--accent2:#ffb454;--today:#1f3a2e;--today-line:#39d98a;
+    --skip:#3a2330;--skip-line:#ff7a90;--off:#222b36;--off-line:#5a6b7d;}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;line-height:1.5;}
+  .wrap{max-width:840px;margin:0 auto;padding:32px 18px 80px;}
+  h1{font-size:24px;margin:0 0 4px;} .sub{color:var(--muted);font-size:13px;margin-bottom:22px;}
+  .gate{max-width:360px;margin:12vh auto;text-align:center;}
+  .gate h1{margin-bottom:6px;} .gate p{color:var(--muted);font-size:13px;margin-bottom:18px;}
+  input,button{font-family:inherit;font-size:15px;border-radius:8px;}
+  input{background:var(--card2);border:1px solid var(--line);color:var(--txt);padding:10px 12px;width:100%;}
+  input:focus{outline:none;border-color:var(--accent);}
+  button{cursor:pointer;background:var(--accent);color:#08222e;border:none;padding:10px 18px;font-weight:600;margin-top:12px;width:100%;}
+  button:hover{filter:brightness(1.1);}
+  .err{color:var(--skip-line);font-size:13px;margin-top:10px;min-height:18px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;}
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{color:var(--muted);font-size:12px;font-weight:600;}
+  td.date{white-space:nowrap;} td.num{color:var(--muted);white-space:nowrap;}
+  .pname{display:inline-block;padding:2px 8px;border-radius:6px;background:var(--card2);
+    border:1px solid var(--line);margin:1px 0;font-size:13px;}
+  tr.today{background:var(--today);} tr.today td{border-color:var(--today-line);}
+  tr.off{background:var(--off);color:var(--muted);font-style:italic;}
+  .tag{display:inline-block;margin-left:8px;font-size:11px;color:#08222e;background:var(--today-line);
+    padding:1px 7px;border-radius:10px;font-weight:700;}
+  .moved{color:var(--accent2);font-size:12px;}
+  .skip{margin-top:18px;} .skip h2{font-size:13px;color:var(--accent);margin:0 0 8px;}
+  .skip-item{background:var(--skip);border:1px solid var(--skip-line);border-radius:8px;padding:7px 10px;margin-bottom:6px;}
+  .skip-item b{color:#ffd0d8;} .skip-item .why{color:var(--muted);font-size:12px;}
+  .upd{color:var(--muted);font-size:12px;margin-top:14px;}
+  .hidden{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="gate" class="gate">
+    <h1>组会汇报排表</h1>
+    <p>请输入查看密码</p>
+    <input type="password" id="pw" placeholder="密码" autofocus>
+    <button id="unlock">查看</button>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div id="content" class="hidden">
+    <h1>组会汇报排表</h1>
+    <div class="sub">每周六 · 按名单顺序循环</div>
+    <div class="card">
+      <table id="sched"><thead><tr><th>期数</th><th>汇报日</th><th>汇报人</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="skip" id="skipWrap"></div>
+    <div class="upd" id="upd"></div>
+  </div>
+</div>
+
+<script>
+const WD=["日","一","二","三","四","五","六"];
+function todayStr(){ const d=new Date(); const p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); }
+function u8(b64){ const s=atob(b64); const a=new Uint8Array(s.length); for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i); return a; }
+
+async function decrypt(blob,pw){
+  const salt=u8(blob.salt), iv=u8(blob.iv), ct=u8(blob.ct);
+  const km=await crypto.subtle.importKey("raw",new TextEncoder().encode(pw),"PBKDF2",false,["deriveKey"]);
+  const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:150000,hash:"SHA-256"},
+    km,{name:"AES-GCM",length:256},false,["decrypt"]);
+  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv},key,ct);
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+function render(data){
+  const tStr=todayStr();
+  const tb=document.querySelector("#sched tbody"); tb.innerHTML=""; let i=0;
+  data.rows.forEach(r=>{
+    const tr=document.createElement("tr");
+    if(r.off){
+      tr.className="off";
+      tr.innerHTML='<td class="num">—</td><td class="date">'+r.date+'</td><td>⏸ 停会'+(r.reason?"："+r.reason:"")+'</td>';
+    }else{
+      i++;
+      if(r.date===tStr) tr.className="today";
+      const ppl=r.people.map(p=>'<span class="pname">'+(p.n?p.n+". ":"")+p.name+'</span>').join(" ");
+      const tag=r.date===tStr?'<span class="tag">今天</span>':'';
+      const dc=r.date+'　周'+(r.weekday?r.weekday.replace("周",""):"六")+(r.moved?'<div class="moved">（改期）</div>':'');
+      tr.innerHTML='<td class="num">第 '+i+' 次</td><td class="date">'+dc+tag+'</td><td>'+ppl+'</td>';
+    }
+    tb.appendChild(tr);
+  });
+  const sw=document.getElementById("skipWrap");
+  if(data.skip&&data.skip.length){
+    sw.innerHTML='<h2>🔕 暂缓 / 请假</h2>'+data.skip.map(s=>
+      '<div class="skip-item"><b>'+(s.n?s.n+". ":"")+s.name+'</b>'+(s.reason?'<div class="why">'+s.reason+'</div>':'')+'</div>').join("");
+  }
+  if(data.updated){ document.getElementById("upd").textContent="更新于 "+new Date(data.updated).toLocaleString("zh-CN"); }
+  document.getElementById("gate").classList.add("hidden");
+  document.getElementById("content").classList.remove("hidden");
+}
+
+let BLOB=null;
+async function tryUnlock(){
+  const err=document.getElementById("err"); err.textContent="";
+  const pw=document.getElementById("pw").value;
+  if(!pw){ err.textContent="请输入密码"; return; }
+  if(!BLOB || BLOB.placeholder){ err.textContent="排表尚未发布，请管理员用编辑器导出加密数据替换 data.json"; return; }
+  try{
+    const data=await decrypt(BLOB,pw);
+    sessionStorage.setItem("zh_pw",pw);
+    render(data);
+  }catch(e){ err.textContent="密码错误或数据损坏"; }
+}
+
+document.getElementById("unlock").onclick=tryUnlock;
+document.getElementById("pw").addEventListener("keydown",e=>{ if(e.key==="Enter") tryUnlock(); });
+
+fetch("./data.json?ts="+Date.now()).then(r=>r.json()).then(b=>{
+  BLOB=b;
+  if(b && b.placeholder){
+    document.getElementById("err").textContent="排表尚未发布，请管理员发布后再查看。";
+    return;
+  }
+  const saved=sessionStorage.getItem("zh_pw");
+  if(saved){ document.getElementById("pw").value=saved; tryUnlock(); }
+}).catch(()=>{ document.getElementById("err").textContent="未找到 data.json"; });
+</script>
+</body>
+</html>
