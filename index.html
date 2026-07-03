@@ -81,7 +81,7 @@ function render(data){
     const tr=document.createElement("tr");
     if(r.off){
       tr.className="off";
-      tr.innerHTML='<td class="num">—</td><td class="date">'+r.date+'</td><td>⏸ 停会'+(r.reason?"："+r.reason:"")+'</td>';
+      tr.innerHTML='<td class="num">—</td><td class="date">'+r.date+'</td><td>⏸ '+(r.reason||'停会')+'</td>';
     }else{
       i++;
       if(r.date===tStr) tr.className="today";
